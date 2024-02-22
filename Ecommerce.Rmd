@@ -1,0 +1,79 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+```{r 1}
+# Load necessary libraries
+library(caret)
+library(nortest)
+library(lmtest)
+library(car)
+library(MLmetrics)
+library(ggplot2)
+library(stargazer)
+
+# Load the dataset
+library(readr)
+df <- read_csv("ecommerce_customers.csv")
+
+
+# Basic Data Examination
+dim(df)
+summary(df)
+
+# Check missing value
+sapply(df, function(x) sum(is.na(x)))
+
+# Check and remove outliers
+# Outlier removal functions 
+outliers <- function(x) {
+  Q1 <- quantile(x, probs=.25)
+  Q3 <- quantile(x, probs=.75)
+  iqr = Q3-Q1
+  upper_limit = Q3 + (iqr*1.5)
+  lower_limit = Q1 - (iqr*1.5)
+  x > upper_limit | x < lower_limit
+}
+
+remove_outliers <- function(df, cols = names(df)) {
+  for (col in cols) {
+    df <- df[!outliers(df[[col]]),]
+  }
+  df
+}
+
+df_new = remove_outliers(df, c('Avg_Session_Length', 'Time_on_App', 'Time_on_Website', 'Length_of_Membership', 'Yearly_Amount_Spent'))
+
+# Perform k-means clustering for segmentation
+set.seed(42) # For reproducibility
+num_clusters <- 3 # Define the number of clusters
+clusters <- kmeans(df_new[,c('Avg_Session_Length', 'Time_on_App', 'Length_of_Membership')], centers = num_clusters, nstart = 25)
+df_new$cluster <- as.factor(clusters$cluster)
+
+# Cross-validation setup
+control <- trainControl(method = "cv", number = 10) # 10-fold cross-validation
+
+# Fitting Model for each cluster with cross-validation
+df_new$cluster <- as.numeric(as.character(df_new$cluster))
+models <- list()
+for (i in 1:num_clusters) {
+  cluster_data <- subset(df_new, cluster == i)
+  model <- train(Yearly_Amount_Spent ~ Avg_Session_Length + Time_on_App + Length_of_Membership, 
+                 data = cluster_data, 
+                 method = "lm", 
+                 trControl = control)
+  models[[i]] <- model
+}
+
+final_models <- lapply(models, function(x) x$finalModel)
+# Summarize models 
+lapply(models, summary)
+# Presenting model results using stargazer
+stargazer(final_models, type = "text", title = "Regression Models for E-Commerce Customer Segments",
+          header = FALSE, digits = 2, out = "models_results.txt")
+
+# Model evaluation can be extracted from the models' summaries, as cross-validation scores are included
+```
+
